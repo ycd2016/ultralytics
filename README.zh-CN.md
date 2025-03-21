@@ -28,28 +28,33 @@
 通过并行双路径结构实现了：
 
 1. **多尺度特征融合**：3×3卷积捕获局部空间特征，1×1卷积提取全局上下文信息，通过线性叠加实现特征增强：
-   $$
+
+   ```math
    Z = \mathcal{F}_{3×3}(X) + \mathcal{F}_{1×1}(X)
-   $$
+   ```
 
 2. **参数效率优化**：1×1卷积作为轻量级补充分支，仅增加 $C^2$ 参数，实现计算量 $\mathcal{O}(C^2)$ 级的优化。
 
 ### 理论优势
 
 1. **特征表达增强**：双分支结构扩展了假设空间，使网络能学习更复杂的特征组合。根据通用近似定理，双线性组合使模型容量提升：
-   $$
+
+   ```math
    \exists W_1,W_2 \quad s.t. \quad ||f(x)-(W_1^T\phi_1(x)+W_2^T\phi_2(x))|| < \epsilon
-   $$
+   ```
 
 2. **梯度传播优化**：反向传播时梯度流分为两路，缓解梯度消失问题：
-   $$
+
+   ```math
    \frac{\partial \mathcal{L}}{\partial X} = \frac{\partial \mathcal{L}}{\partial Z} \left( \frac{\partial \mathcal{F}_{3×3}}{\partial X} + \frac{\partial \mathcal{F}_{1×1}}{\partial X} \right)
-   $$
+   ```
 
 3. **推理加速机制**：通过卷积核融合技术，将双卷积合并为等效单卷积：
-   $$
+
+   ```math
    W_{fused} = W_{3×3} + \hat{W}_{1×1}
-   $$
+   ```
+
    其中 $\hat{W}_{1×1}$ 是将 1×1 卷积核 zero-padding 为 3×3 形式的扩展表示。
 
 ## 二、EIoU
@@ -58,9 +63,9 @@
 
 引入了 Elastic IoU，这是一个更为鲁棒的 IoU 计算方法，特别适用于小而密集的目标。
 
-$$
+```math
 \mathcal{L}_{EIoU} = 1 - IoU + \frac{\rho^2(b,b^{gt})}{c^2} + \beta \cdot \tanh(\sqrt{A \cdot A^{gt}}/\tau)\cdot v
-$$
+```
 
 其中：
 
@@ -72,34 +77,44 @@ $$
 
 1. **动态惩罚机制**：
    - 原版 CIoU 使用固定权重组合中心距离与长宽比项：
-     $$
+
+     ```math
      \mathcal{L}_{CIoU} = 1 - IoU + \frac{\rho^2}{c^2} + \beta v
-     $$
+     ```
+
    - 改进版 EIoU 引入自适应权重：
-     $$
+
+     ```math
      \mathcal{L}_{EIoU} = 1 - IoU + \underbrace{\omega (\frac{\rho^2}{c^2} + 0.3v)}_{\text{弹性惩罚项}}
-     $$
+     ```
+
      其中权重项 $\omega = (1-IoU)^\beta(1+\alpha)\in[0.5,3]$，β=1.5 为稳定超参数。
 
 2. **小目标优化**：
    新增面积敏感函数：
-   $$
+
+   ```math
    \alpha = 1 - \tanh\left(\frac{\sqrt{A_1A_2}}{75}\right)
-   $$
+   ```
+
    该函数在 $A<75^2$ 时输出接近 1，使小目标获得更强的梯度回传。相比原版 CIoU，对小目标的定位误差敏感度显著提升：
-   $$
+
+   ```math
    \frac{\partial \mathcal{L}_{EIoU}}{\partial \rho} \propto \frac{2\rho}{c^2}(1+\alpha) > \frac{2\rho}{c^2}
-   $$
+   ```
 
 3. **数值稳定性增强**：
    - 引入尺寸下限约束：
-     $$
+
+     ```math
      w_{safe} = \max(w, \epsilon)
-     $$
+     ```
+
    - 使用 arctan 替代原始宽高比计算，将比值差异映射到 $(-π/2, π/2)$ 区间，防止梯度爆炸：
-     $$
+
+     ```math
      \Delta\theta = \arctan\frac{w_2}{h_2} - \arctan\frac{w_1}{h_1} \in (-π, π)
-     $$
+     ```
 
 ## 三、协同注意力
 
@@ -111,13 +126,13 @@ $$
 
 引入的通道注意力模块采用双重压缩-激励策略，其数学表达为：
 
-$$
+```math
 \begin{aligned}
 &z_c = \mathcal{F}_{GAP}(X) \\
 &w_c = \sigma(W_2 \cdot \delta(W_1 \cdot z_c)) \\
 &Y_c = X \odot (1 + \alpha w_c) \quad (\alpha=0.5)
 \end{aligned}
-$$
+```
 
 其中 $\mathcal{F}_{GAP}$ 为全局平均池化，$\delta$ 为 SiLU 激活函数，$\sigma$ 为 Sigmoid 函数。相比传统 SE 模块，改进在于：
 
@@ -128,9 +143,9 @@ $$
 
 空间注意力模块采用轻量化设计：
 
-$$
+```math
 w_s = \sigma(BN(Conv_{1\times1}(X)))
-$$
+```
 
 该设计特点：
 
@@ -139,9 +154,9 @@ $$
 
 ### 数学表达
 
-$$
+```math
 X_{enhanced} = X \odot (1+\frac{1}{2}SE(X)) \odot (1+\frac{1}{2}SA(X))
-$$
+```
 
 ### 优势分析
 
