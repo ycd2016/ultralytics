@@ -1,5 +1,7 @@
 # YOLO 系列提升
 
+[下载权重](https://drive.google.com/drive/folders/1jaH9J0cQ-5ypgHovUtRlylz4FOX4hhOr?usp=sharing)
+
 ## 项目简介
 
 我询问Claude 3.7要如何在保持推理速度基本不变的情况下，通过结构创新和损失函数优化实现YOLO系列的精度提升，最终生成了本项目的代码。
