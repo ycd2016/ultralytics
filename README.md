@@ -28,9 +28,9 @@ Implemented through a parallel dual-path structure:
 
 1. **Multi-scale Feature Fusion**: The 3×3 convolution captures local spatial features, while the 1×1 convolution extracts global contextual information, achieving feature enhancement through linear superposition:
 
-   ```math
-   Z = \mathcal{F}_{3×3}(X) + \mathcal{F}_{1×1}(X)
-   ```
+```math
+Z = \mathcal{F}_{3×3}(X) + \mathcal{F}_{1×1}(X)
+```
 
 2. **Parameter Efficiency Optimization**: The 1×1 convolution serves as a lightweight complementary branch, adding only $C^2$ parameters, achieving computational optimization at the $\mathcal{O}(C^2)$ level.
 
@@ -38,23 +38,23 @@ Implemented through a parallel dual-path structure:
 
 1. **Enhanced Feature Representation**: The dual-branch structure expands the hypothesis space, allowing the network to learn more complex feature combinations. According to the universal approximation theorem, the bilinear combination increases model capacity:
 
-   ```math
-   \exists W_1,W_2 \quad s.t. \quad ||f(x)-(W_1^T\phi_1(x)+W_2^T\phi_2(x))|| < \epsilon
-   ```
+```math
+\exists W_1,W_2 \quad s.t. \quad ||f(x)-(W_1^T\phi_1(x)+W_2^T\phi_2(x))|| < \epsilon
+```
 
 2. **Gradient Propagation Optimization**: During backpropagation, the gradient flow is divided into two paths, alleviating the gradient vanishing problem:
 
-   ```math
-   \frac{\partial \mathcal{L}}{\partial X} = \frac{\partial \mathcal{L}}{\partial Z} \left( \frac{\partial \mathcal{F}_{3×3}}{\partial X} + \frac{\partial \mathcal{F}_{1×1}}{\partial X} \right)
-   ```
+```math
+\frac{\partial \mathcal{L}}{\partial X} = \frac{\partial \mathcal{L}}{\partial Z} \left( \frac{\partial \mathcal{F}_{3×3}}{\partial X} + \frac{\partial \mathcal{F}_{1×1}}{\partial X} \right)
+```
 
 3. **Inference Acceleration Mechanism**: Through convolution kernel fusion technology, the dual convolutions are merged into an equivalent single convolution:
 
-   ```math
-   W_{fused} = W_{3×3} + \hat{W}_{1×1}
-   ```
+```math
+W_{fused} = W_{3×3} + \hat{W}_{1×1}
+```
 
-   where $\hat{W}_{1×1}$ is the zero-padded 1×1 convolution kernel expanded to a 3×3 form.
+where $\hat{W}_{1×1}$ is the zero-padded 1×1 convolution kernel expanded to a 3×3 form.
 
 ## II. EIoU
 
@@ -75,45 +75,44 @@ where:
 ### Advantage Analysis
 
 1. **Dynamic Penalty Mechanism**:
-   - The original CIoU uses fixed weights to combine center distance and aspect ratio terms:
+- The original CIoU uses fixed weights to combine center distance and aspect ratio terms:
 
-     ```math
-     \mathcal{L}_{CIoU} = 1 - IoU + \frac{\rho^2}{c^2} + \beta v
-     ```
+```math
+\mathcal{L}_{CIoU} = 1 - IoU + \frac{\rho^2}{c^2} + \beta v
+```
 
-   - The improved EIoU introduces adaptive weights:
+- The improved EIoU introduces adaptive weights:
 
-     ```math
-     \mathcal{L}_{EIoU} = 1 - IoU + \underbrace{\omega (\frac{\rho^2}{c^2} + 0.3v)}_{\text{Elastic Penalty Term}}
-     ```
-
-     where the weight term $\omega = (1-IoU)^\beta(1+\alpha)\in[0.5,3]$, β=1.5 is a stable hyperparameter.
+```math
+\mathcal{L}_{EIoU} = 1 - IoU + \underbrace{\omega (\frac{\rho^2}{c^2} + 0.3v)}_{\text{Elastic Penalty Term}}
+```
+where the weight term $\omega = (1-IoU)^\beta(1+\alpha)\in[0.5,3]$, β=1.5 is a stable hyperparameter.
 
 2. **Small Object Optimization**:
-   Added area-sensitive function:
+Added area-sensitive function:
 
-   ```math
-   \alpha = 1 - \tanh\left(\frac{\sqrt{A_1A_2}}{75}\right)
-   ```
+```math
+\alpha = 1 - \tanh\left(\frac{\sqrt{A_1A_2}}{75}\right)
+```
 
-   This function outputs close to 1 when $A<75^2$, giving small objects stronger gradient backpropagation. Compared to the original CIoU, the sensitivity to localization errors for small objects is significantly enhanced:
-   
-   ```math
-   \frac{\partial \mathcal{L}_{EIoU}}{\partial \rho} \propto \frac{2\rho}{c^2}(1+\alpha) > \frac{2\rho}{c^2}
-   ```
+This function outputs close to 1 when $A<75^2$, giving small objects stronger gradient backpropagation. Compared to the original CIoU, the sensitivity to localization errors for small objects is significantly enhanced:
+
+```math
+\frac{\partial \mathcal{L}_{EIoU}}{\partial \rho} \propto \frac{2\rho}{c^2}(1+\alpha) > \frac{2\rho}{c^2}
+```
 
 3. **Enhanced Numerical Stability**:
-   - Introduced size lower bound constraint:
+- Introduced size lower bound constraint:
 
-     ```math
-     w_{safe} = \max(w, \epsilon)
-     ```
+```math
+w_{safe} = \max(w, \epsilon)
+```
 
-   - Used arctan to replace the original aspect ratio calculation, mapping the ratio difference to the $(-π/2, π/2)$ interval, preventing gradient explosion:
-   
-     ```math
-     \Delta\theta = \arctan\frac{w_2}{h_2} - \arctan\frac{w_1}{h_1} \in (-π, π)
-     ```
+- Used arctan to replace the original aspect ratio calculation, mapping the ratio difference to the $(-π/2, π/2)$ interval, preventing gradient explosion:
+
+```math
+\Delta\theta = \arctan\frac{w_2}{h_2} - \arctan\frac{w_1}{h_1} \in (-π, π)
+```
 
 ## III. Collaborative Attention
 
