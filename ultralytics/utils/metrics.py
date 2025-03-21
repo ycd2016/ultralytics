@@ -71,7 +71,7 @@ def box_iou(box1, box2, eps=1e-7):
     return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
 
 
-def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, EIoU=False, eps=1e-7):
     """
     Calculate the Intersection over Union (IoU) between bounding boxes.
 
@@ -88,10 +88,11 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
         GIoU (bool, optional): If True, calculate Generalized IoU.
         DIoU (bool, optional): If True, calculate Distance IoU.
         CIoU (bool, optional): If True, calculate Complete IoU.
+        EIoU (bool, optional): If True, calculate Elastic IoU.
         eps (float, optional): A small value to avoid division by zero.
 
     Returns:
-        (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
+        (torch.Tensor): IoU, GIoU, DIoU, CIoU, or EIoU values depending on the specified flags.
     """
     # Get the coordinates of bounding boxes
     if xywh:  # transform from xywh to xyxy
@@ -115,7 +116,53 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
 
     # IoU
     iou = inter / union
-    if CIoU or DIoU or GIoU:
+    
+    if EIoU:  # Elastic IoU - robust version for small dense objects
+        # Area calculation
+        area1, area2 = w1 * h1, w2 * h2
+        
+        # Calculate center distance and convex hull properties
+        cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex width
+        ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
+        c2 = cw.pow(2) + ch.pow(2) + eps  # convex diagonal squared
+        
+        # Center distance calculation
+        center_dist_x = (b2_x1 + b2_x2) / 2 - (b1_x1 + b1_x2) / 2
+        center_dist_y = (b2_y1 + b2_y2) / 2 - (b1_y1 + b1_y2) / 2
+        rho2 = (center_dist_x.pow(2) + center_dist_y.pow(2)) / 4
+        
+        # Aspect ratio consistency term with numerical stability
+        w1_safe = w1.clamp(min=eps)
+        h1_safe = h1.clamp(min=eps)
+        w2_safe = w2.clamp(min=eps)
+        h2_safe = h2.clamp(min=eps)
+        v = (4 / math.pi**2) * ((w2_safe / h2_safe).atan() - (w1_safe / h1_safe).atan()).pow(2)
+        
+        # Small object awareness - smooth, bounded function
+        # Using tanh for smoother transition and better gradient flow
+        size_factor = 1.0 - torch.tanh(torch.sqrt(area1 * area2) / 75.0)
+        
+        # Balance term - consistent across training and validation
+        alpha = 0.8  # Fixed value to ensure consistency
+        beta = 1.5   # Fixed power term
+        
+        # Combine components with balanced, stable weights
+        # Spatial penalty - more weight for small objects but bounded
+        spatial_penalty = rho2 / c2
+        
+        # Shape penalty - considers aspect ratio differences
+        shape_penalty = v * 0.3  # Fixed coefficient for stability
+        
+        # Combined penalty with size-aware scaling, but bounded
+        penalty = spatial_penalty + size_factor * shape_penalty
+        
+        # Apply adaptive weighting with bounds to prevent extreme values
+        weight = (1 - iou).pow(beta) * (1 + size_factor * alpha)
+        weight = weight.clamp(0.5, 3.0)  # Prevent extreme penalties
+        
+        return iou - weight * penalty  # Robust EIoU
+        
+    elif CIoU or DIoU or GIoU:
         cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
         ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
         if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1

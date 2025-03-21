@@ -34,7 +34,7 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
     return p
 
 
-class Conv(nn.Module):
+class Conv_Naive(nn.Module):
     """
     Standard convolution module with batch normalization and activation.
 
@@ -91,7 +91,7 @@ class Conv(nn.Module):
         return self.act(self.conv(x))
 
 
-class Conv2(Conv):
+class Conv(Conv_Naive):
     """
     Simplified RepConv module with Conv fusing.
 
@@ -151,6 +151,9 @@ class Conv2(Conv):
         self.conv.weight.data += w
         self.__delattr__("cv2")
         self.forward = self.forward_fuse
+
+
+Conv2 = Conv
 
 
 class LightConv(nn.Module):

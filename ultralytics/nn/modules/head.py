@@ -57,17 +57,45 @@ class Detect(nn.Module):
         )
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
+        # 改进1: 轻量级通道注意力模块 (简化以提高收敛性)
+        self.feature_enhance = nn.ModuleList(
+            nn.Sequential(
+                nn.AdaptiveAvgPool2d(1),
+                nn.Conv2d(x, x // 8, 1),
+                nn.SiLU(),
+                nn.Conv2d(x // 8, x, 1),
+                nn.Sigmoid()
+            ) for x in ch
+        )
+        
+        # 改进2: 简化的空间注意力 (降低复杂度, 加强稳定性)
+        self.spatial_attention = nn.ModuleList(
+            nn.Sequential(
+                nn.Conv2d(x, 1, 3, padding=1),  # 使用更小的卷积核
+                nn.BatchNorm2d(1),  # 添加BatchNorm
+                nn.Sigmoid()
+            ) for x in ch
+        )
+
         if self.end2end:
             self.one2one_cv2 = copy.deepcopy(self.cv2)
             self.one2one_cv3 = copy.deepcopy(self.cv3)
+            self.one2one_enhance = copy.deepcopy(self.feature_enhance)
+            self.one2one_spatial = copy.deepcopy(self.spatial_attention)
 
     def forward(self, x):
         """Concatenates and returns predicted bounding boxes and class probabilities."""
         if self.end2end:
             return self.forward_end2end(x)
 
+        # 通道注意力增强 (残差连接方式)
+        x_channel = [x[i] * (1.0 + 0.5 * self.feature_enhance[i](x[i])) for i in range(self.nl)]  # 缩小影响
+        
+        # 空间注意力增强 (残差连接方式)
+        x_enhanced = [x_channel[i] * (1.0 + 0.5 * self.spatial_attention[i](x[i])) for i in range(self.nl)]  # 缩小影响
+
         for i in range(self.nl):
-            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+            x[i] = torch.cat((self.cv2[i](x_enhanced[i]), self.cv3[i](x_enhanced[i])), 1)
         if self.training:  # Training path
             return x
         y = self._inference(x)
@@ -75,21 +103,25 @@ class Detect(nn.Module):
 
     def forward_end2end(self, x):
         """
-        Performs forward pass of the v10Detect module.
-
-        Args:
-            x (tensor): Input tensor.
-
-        Returns:
-            (dict, tensor): If not in training mode, returns a dictionary containing the outputs of both one2many and one2one detections.
-                           If in training mode, returns a dictionary containing the outputs of one2many and one2one detections separately.
+        Performs forward pass of the v10Detect module with enhanced features.
         """
         x_detach = [xi.detach() for xi in x]
+
+        # 通道注意力增强 (残差连接方式)
+        x_channel = [x[i] * (1.0 + 0.5 * self.feature_enhance[i](x[i])) for i in range(self.nl)]  # 缩小影响
+        x_enhanced = [x_channel[i] * (1.0 + 0.5 * self.spatial_attention[i](x[i])) for i in range(self.nl)]
+        
+        x_detach_channel = [x_detach[i] * (1.0 + 0.5 * self.one2one_enhance[i](x_detach[i])) for i in range(self.nl)]
+        x_detach_enhanced = [x_detach_channel[i] * (1.0 + 0.5 * self.one2one_spatial[i](x_detach[i])) for i in range(self.nl)]
+
         one2one = [
-            torch.cat((self.one2one_cv2[i](x_detach[i]), self.one2one_cv3[i](x_detach[i])), 1) for i in range(self.nl)
+            torch.cat((self.one2one_cv2[i](x_detach_enhanced[i]), self.one2one_cv3[i](x_detach_enhanced[i])), 1) 
+            for i in range(self.nl)
         ]
+
         for i in range(self.nl):
-            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+            x[i] = torch.cat((self.cv2[i](x_enhanced[i]), self.cv3[i](x_enhanced[i])), 1)
+
         if self.training:  # Training path
             return {"one2many": x, "one2one": one2one}
 
@@ -133,15 +165,49 @@ class Detect(nn.Module):
     def bias_init(self):
         """Initialize Detect() biases, WARNING: requires stride availability."""
         m = self  # self.model[-1]  # Detect() module
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1
-        # ncf = math.log(0.6 / (m.nc - 0.999999)) if cf is None else torch.log(cf / cf.sum())  # nominal class frequency
-        for a, b, s in zip(m.cv2, m.cv3, m.stride):  # from
+        
+        # 对不同检测层应用不同偏置初始化策略，加强小目标检测层
+        for i, (a, b, s) in enumerate(zip(m.cv2, m.cv3, m.stride)):
             a[-1].bias.data[:] = 1.0  # box
-            b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
+            
+            # 对于小特征图层(大stride)，增加对小目标的敏感度
+            if i == 0:  # 最小的特征图层(通常用于大目标)
+                b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)
+            else:  # 较大的特征图层(用于中小目标)
+                # 为小目标检测层增加正偏置，提高召回率
+                b[-1].bias.data[: m.nc] = math.log(8 / m.nc / (640 / s) ** 2)  # 增大正样本偏置
+            
         if self.end2end:
             for a, b, s in zip(m.one2one_cv2, m.one2one_cv3, m.stride):  # from
                 a[-1].bias.data[:] = 1.0  # box
                 b[-1].bias.data[: m.nc] = math.log(5 / m.nc / (640 / s) ** 2)  # cls (.01 objects, 80 classes, 640 img)
+        
+        # 初始化注意力模块，避免初始时对特征有过大影响
+        for fe, sa in zip(m.feature_enhance, m.spatial_attention):
+            # 初始化通道注意力最后一个卷积为接近0的小值
+            if hasattr(fe[-2], 'weight'):
+                nn.init.normal_(fe[-2].weight, mean=0.0, std=0.01)
+                if hasattr(fe[-2], 'bias') and fe[-2].bias is not None:
+                    nn.init.constant_(fe[-2].bias, 0)
+            
+            # 初始化空间注意力卷积为接近0的小值
+            if hasattr(sa[0], 'weight'):
+                nn.init.normal_(sa[0].weight, mean=0.0, std=0.01)
+                if hasattr(sa[0], 'bias') and sa[0].bias is not None:
+                    nn.init.constant_(sa[0].bias, 0)
+        
+        # 同样初始化one2one路径的注意力模块
+        if self.end2end:
+            for fe, sa in zip(m.one2one_enhance, m.one2one_spatial):
+                if hasattr(fe[-2], 'weight'):
+                    nn.init.normal_(fe[-2].weight, mean=0.0, std=0.01)
+                    if hasattr(fe[-2], 'bias') and fe[-2].bias is not None:
+                        nn.init.constant_(fe[-2].bias, 0)
+                
+                if hasattr(sa[0], 'weight'):
+                    nn.init.normal_(sa[0].weight, mean=0.0, std=0.01)
+                    if hasattr(sa[0], 'bias') and sa[0].bias is not None:
+                        nn.init.constant_(sa[0].bias, 0)
 
     def decode_bboxes(self, bboxes, anchors, xywh=True):
         """Decode bounding boxes."""
