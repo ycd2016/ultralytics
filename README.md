@@ -18,6 +18,10 @@ I don't have a T4 for speed testing, so I removed the speed comparison column.
 | 12l            | 55.5           | +1.7           | 26.5       | 89.1      | 57.5           |
 | 12x            | 57.6           | +2.2           | 59.4       | 199.4     | 58.7           |
 
+<figure>
+    <img src="flops.png" alt="flops" style="width: 50%;"><img src="params.png" alt="params" style="width: 50%;">
+</figure>
+
 ## I. Heterogeneous Convolution
 
 ### Core Idea
